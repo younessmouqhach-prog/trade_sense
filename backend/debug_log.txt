@@ -1,0 +1,48 @@
+[DEBUG] get_price_history called: symbol=NVDA, timeframe='1d', type=<class 'str'>, repr='1d'
+[DEBUG] timeframe.lower() = '1d', == '1d': True
+[DEBUG] get_price_history called: symbol=NVDA, timeframe='1d', type=<class 'str'>, repr='1d'
+[DEBUG] timeframe.lower() = '1d', == '1d': True
+[DEBUG] get_price_history called: symbol=NVDA, timeframe='1d', type=<class 'str'>, repr='1d'
+[DEBUG] timeframe.lower() = '1d', == '1d': True
+[DEBUG] get_price_history called: symbol=NVDA, timeframe='1d', type=<class 'str'>, repr='1d'
+[DEBUG] timeframe.lower() = '1d', == '1d': True
+[DEBUG] get_price_history called: symbol=NVDA, timeframe='1d', type=<class 'str'>, repr='1d'
+[DEBUG] timeframe.lower() = '1d', == '1d': True
+[DEBUG] get_price_history called: symbol=NVDA, timeframe='1d', type=<class 'str'>, repr='1d'
+[DEBUG] timeframe.lower() = '1d', == '1d': True
+[DEBUG] get_price_history called: symbol=NVDA, timeframe='1d', type=<class 'str'>, repr='1d'
+[DEBUG] timeframe.lower() = '1d', == '1d': True
+[DEBUG] get_price_history called: symbol=NVDA, timeframe='1d', type=<class 'str'>, repr='1d'
+[DEBUG] timeframe.lower() = '1d', == '1d': True
+[DEBUG] get_price_history called: symbol=NVDA, timeframe='1d', type=<class 'str'>, repr='1d'
+[DEBUG] timeframe.lower() = '1d', == '1d': True
+[DEBUG] get_price_history called: symbol=NVDA, timeframe='1d', type=<class 'str'>, repr='1d'
+[DEBUG] timeframe.lower() = '1d', == '1d': True
+[DEBUG] get_price_history called: symbol=NVDA, timeframe='1d', type=<class 'str'>, repr='1d'
+[DEBUG] timeframe.lower() = '1d', == '1d': True
+[DEBUG] get_price_history called: symbol=NVDA, timeframe='1d', type=<class 'str'>, repr='1d'
+[DEBUG] timeframe.lower() = '1d', == '1d': True
+[DEBUG] get_price_history called: symbol=NVDA, timeframe='1h', type=<class 'str'>, repr='1h'
+[DEBUG] timeframe.lower() = '1h', == '1d': False
+[DEBUG] get_price_history called: symbol=NVDA, timeframe='1w', type=<class 'str'>, repr='1w'
+[DEBUG] timeframe.lower() = '1w', == '1d': False
+[DEBUG] get_price_history called: symbol=NVDA, timeframe='1m', type=<class 'str'>, repr='1m'
+[DEBUG] timeframe.lower() = '1m', == '1d': False
+[DEBUG] get_price_history called: symbol=NVDA, timeframe='1y', type=<class 'str'>, repr='1y'
+[DEBUG] timeframe.lower() = '1y', == '1d': False
+[DEBUG] get_price_history called: symbol=NVDA, timeframe='1d', type=<class 'str'>, repr='1d'
+[DEBUG] timeframe.lower() = '1d', == '1d': True
+[DEBUG] get_price_history called: symbol=NVDA, timeframe='1d', type=<class 'str'>, repr='1d'
+[DEBUG] timeframe.lower() = '1d', == '1d': True
+[DEBUG] get_price_history called: symbol=NVDA, timeframe='1d', type=<class 'str'>, repr='1d'
+[DEBUG] timeframe.lower() = '1d', == '1d': True
+[DEBUG] get_price_history called: symbol=NVDA, timeframe='1d', type=<class 'str'>, repr='1d'
+[DEBUG] timeframe.lower() = '1d', == '1d': True
+[DEBUG] get_price_history called: symbol=NVDA, timeframe='1d', type=<class 'str'>, repr='1d'
+[DEBUG] timeframe.lower() = '1d', == '1d': True
+[DEBUG] get_price_history called: symbol=NVDA, timeframe='1d', type=<class 'str'>, repr='1d'
+[DEBUG] timeframe.lower() = '1d', == '1d': True
+[DEBUG] get_price_history called: symbol=NVDA, timeframe='1d', type=<class 'str'>, repr='1d'
+[DEBUG] timeframe.lower() = '1d', == '1d': True
+[DEBUG] get_price_history called: symbol=NVDA, timeframe='1d', type=<class 'str'>, repr='1d'
+[DEBUG] timeframe.lower() = '1d', == '1d': True

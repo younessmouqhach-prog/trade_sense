@@ -1,0 +1,1154 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { TrendingUp, TrendingDown, DollarSign, Target, AlertTriangle, Plus, Minus, Loader2, Sun, Moon, X, PieChart, Gauge, Wallet, Activity } from 'lucide-react';
+import { motion } from 'framer-motion';
+import { UserChallenge, Trade, marketAPI, tradeAPI, challengeAPI } from '../api';
+import { useAuth } from '../AuthContext';
+import { createChart, LineSeries, CandlestickSeries, ColorType } from 'lightweight-charts';
+
+interface TradingDashboardProps {
+  onClose: () => void;
+  isDark: boolean;
+  toggleTheme: () => void;
+}
+
+export const TradingDashboard: React.FC<TradingDashboardProps> = ({ onClose, isDark, toggleTheme }) => {
+  // Dashboard component loaded
+
+  const [challenge, setChallenge] = useState<UserChallenge | null>(null);
+  const [trades, setTrades] = useState<Trade[]>([]);
+  const [marketPrices, setMarketPrices] = useState<any>({});
+  const [loading, setLoading] = useState(true);
+  const [tradingSymbol, setTradingSymbol] = useState('NVDA');
+  const [tradeQuantity, setTradeQuantity] = useState('0.01');
+  const [trading, setTrading] = useState(false);
+  const [riskMetrics, setRiskMetrics] = useState<any>(null);
+  const [stopLoss, setStopLoss] = useState('');
+  const [takeProfit, setTakeProfit] = useState('');
+  const [autoTrading, setAutoTrading] = useState(false);
+  const [activeOrders, setActiveOrders] = useState<any[]>([]);
+  const autoTradeIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const chartContainerRef = useRef<HTMLDivElement | null>(null);
+  const chartRef = useRef<ReturnType<typeof createChart> | null>(null);
+  const seriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
+  const [candleData, setCandleData] = useState<{ time: UTCTimestamp; open: number; high: number; low: number; close: number }[]>([]);
+  const [allAssets, setAllAssets] = useState<any[]>([]);
+  const [timeframe, setTimeframe] = useState('1d');
+
+  const { user } = useAuth();
+
+  useEffect(() => {
+    loadDashboardData();
+    loadMarketPrices();
+    loadAllAssets();
+
+    // Refresh market prices every 30 seconds
+    const interval = setInterval(loadMarketPrices, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const loadAllAssets = async () => {
+    try {
+      const [stocks, forex, crypto, morocco] = await Promise.all([
+        marketAPI.getPopularPrices(),
+        marketAPI.getForexPrices(),
+        marketAPI.getCryptoPrices(),
+        marketAPI.getMoroccanPrices()
+      ]);
+      
+      const all: any[] = [];
+      
+      // Add stocks
+      Object.entries(stocks.prices || {}).forEach(([symbol, data]: [string, any]) => {
+        all.push({ symbol, name: data.name || symbol, market: 'stocks', ...data });
+      });
+      
+      // Add forex
+      Object.entries(forex.prices || {}).forEach(([symbol, data]: [string, any]) => {
+        all.push({ symbol, name: data.name || symbol, market: 'forex', ...data });
+      });
+      
+      // Add crypto
+      Object.entries(crypto.prices || {}).forEach(([symbol, data]: [string, any]) => {
+        all.push({ symbol, name: data.name || symbol, market: 'crypto', ...data });
+      });
+      
+      // Add morocco
+      Object.entries(morocco.prices || {}).forEach(([symbol, data]: [string, any]) => {
+        all.push({ symbol, name: data.name || symbol, market: 'morocco', ...data });
+      });
+      
+      setAllAssets(all);
+    } catch (error) {
+      console.error('Failed to load all assets:', error);
+    }
+  };
+
+  // Load candle data when symbol or timeframe changes
+  useEffect(() => {
+    console.log('🔄 Loading data for:', tradingSymbol, timeframe);
+    if (chartRef.current && seriesRef.current) {
+      loadCandleData();
+    }
+  }, [tradingSymbol, timeframe]);
+
+  const loadCandleData = async () => {
+    console.log('📊 loadCandleData called for:', tradingSymbol, timeframe);
+    try {
+      const history = await marketAPI.getPriceHistory(tradingSymbol, timeframe);
+      console.log('📡 History response:', history);
+
+      if (history.candles && history.candles.length > 0) {
+        // Format data for TradingView chart (Unix timestamps)
+        const candles = history.candles.map((c: any) => ({
+          time: c.time,
+          open: parseFloat(c.open),
+          high: parseFloat(c.high),
+          low: parseFloat(c.low),
+          close: parseFloat(c.close),
+        }));
+
+        console.log('✅ Loaded', candles.length, 'candles for', tradingSymbol);
+        setCandleData(candles);
+
+        // Update chart with new data
+        if (seriesRef.current) {
+          seriesRef.current.setData(candles);
+
+          // Fit chart to show all data
+          if (chartRef.current) {
+            chartRef.current.timeScale().fitContent();
+          }
+
+          console.log('📊 Chart updated with', tradingSymbol, 'data');
+        }
+      } else {
+        console.warn('⚠️ No candles in response');
+        // Set some dummy data so chart shows something
+        const now = Math.floor(Date.now() / 1000);
+        const dummyCandles = [
+          { time: now - 3600, open: 100, high: 105, low: 95, close: 102 },
+          { time: now, open: 102, high: 108, low: 98, close: 105 },
+        ];
+        setCandleData(dummyCandles);
+        if (seriesRef.current) {
+          seriesRef.current.setData(dummyCandles);
+        }
+      }
+    } catch (error) {
+      console.error('❌ Failed to load candle data:', error);
+      // Set dummy data on error
+      const now = Math.floor(Date.now() / 1000);
+      const dummyCandles = [
+        { time: now - 3600, open: 100, high: 105, low: 95, close: 102 },
+        { time: now, open: 102, high: 108, low: 98, close: 105 },
+      ];
+      setCandleData(dummyCandles);
+      if (seriesRef.current) {
+        seriesRef.current.setData(dummyCandles);
+      }
+    }
+  };
+
+  useEffect(() => {
+    console.log('🎨 Chart init effect triggered');
+
+    // Small delay to ensure DOM is ready
+    const timer = setTimeout(() => {
+      createSimpleChart();
+    }, 100);
+
+    return () => {
+      clearTimeout(timer);
+      console.log('🧹 Chart cleanup');
+      if (chartRef.current) {
+        chartRef.current.remove();
+        chartRef.current = null;
+        seriesRef.current = null;
+      }
+    };
+  }, [isDark]);
+
+  // Update chart data when candleData changes
+  useEffect(() => {
+    if (seriesRef.current && candleData.length > 0) {
+      console.log('📊 Updating chart with real market data for', tradingSymbol, ':', candleData.length, 'candles');
+      seriesRef.current.setData(candleData);
+
+      // Fit the chart to show all price action
+      setTimeout(() => {
+        if (chartRef.current) {
+          chartRef.current.timeScale().fitContent();
+          console.log('📈 Chart updated and fitted for', tradingSymbol);
+        }
+      }, 100);
+    }
+  }, [candleData]);
+
+  // Initialize chart when component mounts
+  useEffect(() => {
+    console.log('🚀 Initializing chart...');
+    const timer = setTimeout(() => {
+      if (chartContainerRef.current) {
+        createSimpleChart();
+      } else {
+        console.log('⏳ Chart container not ready, retrying...');
+        // Retry after a longer delay
+        setTimeout(() => {
+          if (chartContainerRef.current) {
+            createSimpleChart();
+          }
+        }, 500);
+      }
+    }, 200);
+
+    return () => clearTimeout(timer);
+  }, []);
+
+  // Reload data when symbol or timeframe changes
+  useEffect(() => {
+    console.log('🔄 Loading data for:', tradingSymbol, timeframe);
+    if (chartRef.current && seriesRef.current) {
+      loadCandleData();
+    }
+  }, [tradingSymbol, timeframe]);
+
+  const createSimpleChart = () => {
+    console.log('🎨 Creating real-time chart for', tradingSymbol);
+
+    try {
+      const container = chartContainerRef.current;
+      if (!container) {
+        console.error('❌ No chart container found');
+        return;
+      }
+
+      console.log('✅ Container exists, creating chart...');
+
+      // Clear any existing chart
+      if (chartRef.current) {
+        console.log('🧹 Removing existing chart');
+        chartRef.current.remove();
+        chartRef.current = null;
+        seriesRef.current = null;
+      }
+
+      // Create chart with proper dimensions and theme
+      const chartWidth = Math.max(container.clientWidth || 600, 400);
+      const chartHeight = 280;
+
+      const chart = createChart(container, {
+        width: chartWidth,
+        height: chartHeight,
+        layout: {
+          background: { type: ColorType.Solid, color: 'transparent' },
+          textColor: isDark ? '#e5e7eb' : '#64748b',
+        },
+        grid: {
+          vertLines: { color: isDark ? '#374151' : '#e2e8f0' },
+          horzLines: { color: isDark ? '#374151' : '#e2e8f0' },
+        },
+        rightPriceScale: {
+          borderColor: isDark ? '#374151' : '#e2e8f0',
+        },
+        timeScale: {
+          borderColor: isDark ? '#374151' : '#e2e8f0',
+          timeVisible: true,
+          secondsVisible: false,
+        },
+      });
+
+      console.log('✅ Chart created with real-time config');
+
+      // Add candlestick series for real market data
+      const candlestickSeries = chart.addSeries(CandlestickSeries, {
+        upColor: '#10b981',    // Green for up candles
+        downColor: '#ef4444',  // Red for down candles
+        borderVisible: false,
+        wickUpColor: '#10b981',
+        wickDownColor: '#ef4444',
+      });
+
+      seriesRef.current = candlestickSeries;
+      chartRef.current = chart;
+
+      console.log('✅ Candlestick series ready for', tradingSymbol);
+      console.log('🔄 Data will be loaded via useEffect hooks');
+
+    } catch (error) {
+      console.error('❌ Chart creation failed:', error);
+    }
+  };
+
+  const initChart = () => {
+    if (!chartContainerRef.current) {
+      console.log('❌ Chart container ref not available');
+      return;
+    }
+
+    // Ensure container has dimensions
+    const container = chartContainerRef.current;
+    const width = container.clientWidth || 600;
+    const height = 280;
+
+    if (chartRef.current) {
+      chartRef.current.remove();
+      chartRef.current = null;
+      seriesRef.current = null;
+    }
+
+    try {
+      console.log('🎨 Initializing chart with dimensions:', width, 'x', height, 'Container element:', container);
+      chartRef.current = createChart(container, {
+        width: width,
+        height: height,
+      layout: {
+        background: {
+          type: ColorType.Solid,
+          color: 'transparent', // Let CSS background show through
+        },
+        textColor: isDark ? '#e5e7eb' : '#0f172a',
+      },
+        grid: {
+          vertLines: { color: isDark ? '#1e293b' : '#e2e8f0' },
+          horzLines: { color: isDark ? '#1e293b' : '#e2e8f0' },
+        },
+        rightPriceScale: { borderColor: isDark ? '#1e293b' : '#e2e8f0' },
+        timeScale: { borderColor: isDark ? '#1e293b' : '#e2e8f0' },
+      });
+
+      console.log('📊 Chart created successfully, adding candlestick series...');
+      seriesRef.current = chartRef.current.addCandlestickSeries({
+        upColor: '#10b981', // Green for up candles
+        downColor: '#ef4444', // Red for down candles
+        borderVisible: false,
+        wickUpColor: '#10b981',
+        wickDownColor: '#ef4444',
+      });
+
+    console.log('📈 Candlestick series added, setting initial data...');
+
+    // Set some test data to verify chart is working
+    const testData = [
+      { time: Math.floor(Date.now() / 1000) - 3600 * 4, open: 100, high: 105, low: 95, close: 102 },
+      { time: Math.floor(Date.now() / 1000) - 3600 * 3, open: 102, high: 108, low: 98, close: 105 },
+      { time: Math.floor(Date.now() / 1000) - 3600 * 2, open: 105, high: 110, low: 103, close: 108 },
+      { time: Math.floor(Date.now() / 1000) - 3600 * 1, open: 108, high: 112, low: 106, close: 110 },
+    ];
+
+    seriesRef.current.setData(testData);
+    console.log('✅ Test chart data set:', testData.length, 'candles');
+
+    // Then update with real data if available
+    if (candleData.length > 0) {
+      setTimeout(() => {
+        seriesRef.current?.setData(candleData);
+        console.log('✅ Real chart data set:', candleData.length, 'candles');
+      }, 1000);
+    }
+    } catch (error) {
+      console.error('❌ Error initializing chart:', error);
+    }
+    const handleResize = () => {
+      if (chartRef.current && chartContainerRef.current) {
+        const newWidth = chartContainerRef.current.clientWidth;
+        console.log('📏 Resizing chart to width:', newWidth);
+        chartRef.current.applyOptions({ width: newWidth });
+      }
+    };
+    window.addEventListener('resize', handleResize);
+
+    // Initial fit
+    setTimeout(() => {
+      if (chartRef.current && chartContainerRef.current) {
+        chartRef.current.timeScale().fitContent();
+      }
+    }, 100);
+
+    return () => window.removeEventListener('resize', handleResize);
+  };
+
+  const loadDashboardData = async () => {
+    try {
+      const [challengeData, tradesData] = await Promise.all([
+        challengeAPI.getActiveChallenge(),
+        tradeAPI.getTrades()
+      ]);
+
+      setChallenge(challengeData.challenge);
+      setRiskMetrics(challengeData.risk_metrics);
+      setTrades(tradesData.trades || []);
+    } catch (error) {
+      console.error('Failed to load dashboard data:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadMarketPrices = async () => {
+    try {
+      // Load ALL market data from all sources
+      const [stocks, forex, crypto, morocco] = await Promise.all([
+        marketAPI.getPopularPrices(),
+        marketAPI.getForexPrices(),
+        marketAPI.getCryptoPrices(),
+        marketAPI.getMoroccanPrices()
+      ]);
+
+      // Combine all prices into one object
+      const allPrices: any = {};
+
+      // Add stocks
+      Object.entries(stocks.prices || {}).forEach(([symbol, data]: [string, any]) => {
+        allPrices[symbol] = { ...data, market: 'stocks' };
+      });
+
+      // Add forex
+      Object.entries(forex.prices || {}).forEach(([symbol, data]: [string, any]) => {
+        allPrices[symbol] = { ...data, market: 'forex' };
+      });
+
+      // Add crypto
+      Object.entries(crypto.prices || {}).forEach(([symbol, data]: [string, any]) => {
+        allPrices[symbol] = { ...data, market: 'crypto' };
+      });
+
+      // Add morocco
+      Object.entries(morocco.prices || {}).forEach(([symbol, data]: [string, any]) => {
+        allPrices[symbol] = { ...data, market: 'morocco' };
+      });
+
+      setMarketPrices(allPrices);
+
+      // Check for auto-trade triggers
+      checkAutoTradeTriggers(allPrices);
+    } catch (error) {
+      console.error('Failed to load market prices:', error);
+    }
+  };
+
+  const startAutoTradeMonitoring = () => {
+    if (autoTradeIntervalRef.current) {
+      clearInterval(autoTradeIntervalRef.current);
+    }
+
+    // Monitor every 5 seconds
+    autoTradeIntervalRef.current = setInterval(() => {
+      loadMarketPrices();
+    }, 5000);
+
+    console.log('Auto-trade monitoring started');
+  };
+
+  const checkAutoTradeTriggers = (prices: any) => {
+    if (!challenge || activeOrders.length === 0) return;
+
+    const executedOrders: string[] = [];
+
+    activeOrders.forEach(order => {
+      const currentPrice = prices[order.symbol]?.price;
+      if (!currentPrice) return;
+
+      let shouldExecute = false;
+
+      if (order.type === 'stop_loss' && order.side === 'sell') {
+        // Stop loss: sell when price drops to or below trigger price
+        shouldExecute = currentPrice <= order.triggerPrice;
+      } else if (order.type === 'take_profit' && order.side === 'sell') {
+        // Take profit: sell when price rises to or above trigger price
+        shouldExecute = currentPrice >= order.triggerPrice;
+      }
+
+      if (shouldExecute) {
+        executedOrders.push(order.id);
+        executeAutoTrade(order);
+      }
+    });
+
+    // Remove executed orders
+    if (executedOrders.length > 0) {
+      setActiveOrders(prev => prev.filter(order => !executedOrders.includes(order.id)));
+    }
+  };
+
+  const executeAutoTrade = async (order: any) => {
+    try {
+      console.log(`Executing auto-trade: ${order.type.toUpperCase()} for ${order.symbol}`);
+
+      const result = await tradeAPI.sell(order.symbol, order.quantity);
+
+      setChallenge(result.challenge);
+      await loadDashboardData();
+
+      alert(`🚀 AUTO-TRADE EXECUTED!\n${order.type.toUpperCase()}: Sold ${order.quantity} ${order.symbol} at $${marketPrices[order.symbol]?.price?.toFixed(2)}\nTarget: $${order.triggerPrice.toFixed(2)}`);
+
+    } catch (error: any) {
+      console.error('Auto-trade execution failed:', error);
+      alert(`Auto-trade failed: ${error.message}`);
+    }
+  };
+
+  // Cleanup auto-trade monitoring on unmount
+  useEffect(() => {
+    return () => {
+      if (autoTradeIntervalRef.current) {
+        clearInterval(autoTradeIntervalRef.current);
+      }
+    };
+  }, []);
+
+  const handleBuy = async () => {
+    if (!challenge || trading) return;
+    setTrading(true);
+    try {
+      const quantity = parseFloat(tradeQuantity);
+      const result = await tradeAPI.buy(tradingSymbol, quantity);
+      setChallenge(result.challenge);
+      await loadDashboardData();
+
+      // Set up auto-trading orders if enabled
+      if (autoTrading && (stopLoss || takeProfit) && currentPrice) {
+        const orders = [];
+
+        if (stopLoss) {
+          const stopLossPrice = currentPrice * (1 - parseFloat(stopLoss) / 100);
+          orders.push({
+            id: `sl-${Date.now()}`,
+            type: 'stop_loss',
+            symbol: tradingSymbol,
+            triggerPrice: stopLossPrice,
+            quantity: quantity,
+            side: 'sell',
+            createdAt: Date.now()
+          });
+        }
+
+        if (takeProfit) {
+          const takeProfitPrice = currentPrice * (1 + parseFloat(takeProfit) / 100);
+          orders.push({
+            id: `tp-${Date.now()}`,
+            type: 'take_profit',
+            symbol: tradingSymbol,
+            triggerPrice: takeProfitPrice,
+            quantity: quantity,
+            side: 'sell',
+            createdAt: Date.now()
+          });
+        }
+
+        if (orders.length > 0) {
+          setActiveOrders(prev => [...prev, ...orders]);
+          // Start monitoring for auto-trading
+          startAutoTradeMonitoring();
+          alert(`BUY order executed successfully!\nAuto-trading active: ${orders.map(o => `${o.type.toUpperCase()}: $${o.triggerPrice.toFixed(2)}`).join(', ')}`);
+        } else {
+          alert('BUY order executed successfully');
+        }
+      } else {
+        alert('BUY order executed successfully');
+      }
+    } catch (error: any) {
+      alert(`Trade failed: ${error.message}`);
+    } finally {
+      setTrading(false);
+    }
+  };
+
+  const handleSell = async (tradeId: number) => {
+    if (!challenge || trading) return;
+    setTrading(true);
+    try {
+      const result = await tradeAPI.sell(tradeId);
+      setChallenge(result.challenge);
+      await loadDashboardData();
+      alert('SELL order executed successfully');
+    } catch (error: any) {
+      alert(`Trade failed: ${error.message}`);
+    } finally {
+      setTrading(false);
+    }
+  };
+  const handleSellSelected = async () => {
+    const open = trades.find((t: Trade) => t.status === 'open' && t.symbol === tradingSymbol);
+    if (!open) {
+      alert('No open position for selected symbol');
+      return;
+    }
+    await handleSell(open.id);
+  };
+
+  if (loading) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--background)] text-[var(--foreground)]">
+        <div className="bg-white dark:bg-[#0B1121] rounded-2xl p-8 border border-slate-200 dark:border-white/10 shadow-xl">
+          <Loader2 className="w-8 h-8 animate-spin mx-auto text-cyan-500" />
+          <p className="mt-4 text-slate-600 dark:text-slate-400">Loading dashboard...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!challenge) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[var(--background)] text-[var(--foreground)]">
+        <div className="bg-white dark:bg-[#0B1121] rounded-2xl p-8 max-w-md mx-4 border border-slate-200 dark:border-white/10 shadow-xl">
+          <Target className="w-12 h-12 text-orange-500 mx-auto mb-4" />
+          <h2 className="text-xl font-bold text-center mb-2 text-slate-900 dark:text-white">No Active Challenge</h2>
+          <p className="text-slate-600 dark:text-slate-400 text-center mb-6">
+            You need to purchase a challenge to start trading.
+          </p>
+          <div className="flex space-x-3">
+            <button
+              onClick={onClose}
+              className="flex-1 bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-slate-200 py-2 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
+            >
+              Close
+            </button>
+            <button
+              onClick={() => {
+                onClose();
+                document.getElementById('programs')?.scrollIntoView({ behavior: 'smooth' });
+              }}
+              className="flex-1 text-white py-2 rounded-lg hover:opacity-90 transition-opacity"
+              style={{ background: 'linear-gradient(to right, #06b6d4, #10b981)' }}
+            >
+              View Plans
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const profitLoss = challenge.equity - challenge.initial_balance;
+  const profitPercent = (profitLoss / challenge.initial_balance) * 100;
+  const remainingDailyLoss = riskMetrics ? riskMetrics.remaining_daily_loss : 0;
+  const dailyLossPercent = riskMetrics ? riskMetrics.daily_loss_percent : 0;
+  const drawdownPercent = riskMetrics ? riskMetrics.drawdown_percent : challenge.drawdown_percent;
+  const profitTargetPercent = riskMetrics ? riskMetrics.profit_percent : profitPercent;
+  const currentPrice = marketPrices[tradingSymbol]?.price ?? null;
+  const estimatedCost = currentPrice ? Number(currentPrice) * parseFloat(tradeQuantity || '0') : 0;
+
+
+  return (
+    <div className="min-h-screen bg-[var(--background)] text-[var(--foreground)] pt-24 md:pt-28">
+      <div className="p-4 relative overflow-hidden">
+        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[800px] h-[500px] bg-cyan-500/10 dark:bg-cyan-500/20 rounded-full blur-[120px]" />
+        <div className="absolute bottom-0 right-0 w-[600px] h-[400px] bg-emerald-500/10 dark:bg-emerald-500/10 rounded-full blur-[100px]" />
+        <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-20 dark:opacity-10 pointer-events-none"></div>
+        <div className="max-w-7xl mx-auto relative z-0">
+
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="bg-white dark:bg-[#0B1121]/80 border border-slate-200 dark:border-white/10 rounded-2xl p-4"
+            >
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-slate-500 dark:text-slate-400 text-sm">Balance</p>
+                  <p className="text-slate-900 dark:text-white text-xl font-bold">${challenge.equity.toFixed(2)}</p>
+                </div>
+                <DollarSign className="w-8 h-8 text-emerald-500" />
+              </div>
+            </motion.div>
+
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.1 }}
+              className="bg-white dark:bg-[#0B1121]/80 border border-slate-200 dark:border-white/10 rounded-2xl p-4"
+            >
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-slate-500 dark:text-slate-400 text-sm">P&L</p>
+                  <p className={`text-xl font-bold ${profitLoss >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                    ${profitLoss.toFixed(2)}
+                  </p>
+                </div>
+                {profitLoss >= 0 ? (
+                  <TrendingUp className="w-8 h-8 text-green-500" />
+                ) : (
+                  <TrendingDown className="w-8 h-8 text-red-500" />
+                )}
+              </div>
+            </motion.div>
+
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.2 }}
+              className="bg-white dark:bg-[#0B1121]/80 border border-slate-200 dark:border-white/10 rounded-2xl p-4"
+            >
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-slate-500 dark:text-slate-400 text-sm">Profit %</p>
+                  <p className={`text-xl font-bold ${profitPercent >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                    {profitPercent.toFixed(2)}%
+                  </p>
+                </div>
+                <Target className="w-8 h-8 text-cyan-500" />
+              </div>
+            </motion.div>
+
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.3 }}
+              className="bg-white dark:bg-[#0B1121]/80 border border-slate-200 dark:border-white/10 rounded-2xl p-4"
+            >
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-slate-500 dark:text-slate-400 text-sm">Drawdown</p>
+                  <p className="text-orange-500 text-xl font-bold">
+                    {drawdownPercent.toFixed(2)}%
+                  </p>
+                </div>
+                <AlertTriangle className="w-8 h-8 text-orange-500" />
+              </div>
+            </motion.div>
+          </div>
+
+          {/* Chart Section - Full Width */}
+          <motion.div
+            initial={{ opacity: 0, x: -20 }}
+            animate={{ opacity: 1, x: 0 }}
+            className="bg-white dark:bg-[#0B1121]/80 border border-slate-200 dark:border-white/10 rounded-2xl p-6"
+          >
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center space-x-2">
+                  <Activity className="w-5 h-5 text-cyan-500" />
+                  <h2 className="text-xl font-bold text-slate-900 dark:text-white">Live Chart</h2>
+                </div>
+                <div className="flex items-center space-x-3">
+                  <select
+                    value={tradingSymbol}
+                    onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setTradingSymbol(e.target.value)}
+                    className="bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2 text-slate-900 dark:text-white min-w-[200px]"
+                  >
+                    {allAssets.length > 0 ? (
+                      allAssets.map((asset) => (
+                        <option key={asset.symbol} value={asset.symbol}>
+                          {asset.symbol} - {asset.name} ({asset.market})
+                        </option>
+                      ))
+                    ) : (
+                      <>
+                        <option value="NVDA">NVDA</option>
+                        <option value="ETH-USD">ETH/USD</option>
+                        <option value="AAPL">AAPL</option>
+                        <option value="TSLA">TSLA</option>
+                        <option value="GOOGL">GOOGL</option>
+                      </>
+                    )}
+                  </select>
+                  <select
+                    value={timeframe}
+                    onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setTimeframe(e.target.value)}
+                    className="bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2 text-slate-900 dark:text-white"
+                  >
+                    <option value="1h">1 Hour</option>
+                    <option value="1d">1 Day</option>
+                    <option value="1w">1 Week</option>
+                    <option value="1m">1 Month</option>
+                  </select>
+                </div>
+              </div>
+              <div
+                ref={chartContainerRef}
+                className="w-full h-[280px] rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 relative"
+                style={{
+                  minHeight: '280px',
+                  position: 'relative',
+                  overflow: 'hidden'
+                }}
+              >
+                {candleData.length === 0 && (
+                  <div className="absolute inset-0 flex items-center justify-center text-slate-500 dark:text-slate-400">
+                    <div className="text-center">
+                      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-cyan-500 mx-auto mb-2"></div>
+                      <div className="text-sm">Loading chart data...</div>
+                    </div>
+                  </div>
+                )}
+              </div>
+              <div className="mt-4 grid grid-cols-3 gap-3">
+                <div className="bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-white/10 rounded-lg p-3">
+                  <div className="text-slate-500 dark:text-slate-400 text-sm">Price</div>
+                  <div className="text-slate-900 dark:text-white font-bold">{currentPrice ? `$${Number(currentPrice).toFixed(2)}` : '—'}</div>
+                </div>
+                <div className="bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-white/10 rounded-lg p-3">
+                  <div className="text-slate-500 dark:text-slate-400 text-sm">Daily Loss</div>
+                  <div className="text-slate-900 dark:text-white font-bold">{riskMetrics ? `$${riskMetrics.daily_loss.toFixed(2)}` : '—'}</div>
+                </div>
+                <div className="bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-white/10 rounded-lg p-3">
+                  <div className="text-slate-500 dark:text-slate-400 text-sm">Remaining</div>
+                  <div className="text-slate-900 dark:text-white font-bold">{riskMetrics ? `$${remainingDailyLoss.toFixed(2)}` : '—'}</div>
+                </div>
+              </div>
+            </motion.div>
+
+
+              <div className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div>
+                    <label className="block text-slate-600 dark:text-slate-300 text-sm mb-2">Quantity</label>
+                    <input
+                      type="number"
+                      value={tradeQuantity}
+                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => setTradeQuantity(e.target.value)}
+                      step="0.01"
+                      min="0.01"
+                      className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2 text-slate-900 dark:text-white"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-600 dark:text-slate-300 text-sm mb-2">
+                      Stop Loss (%)
+                      <span className="text-xs text-red-500 ml-1">Optional</span>
+                    </label>
+                    <input
+                      type="number"
+                      value={stopLoss}
+                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => setStopLoss(e.target.value)}
+                      step="0.1"
+                      min="0.1"
+                      max="50"
+                      placeholder="e.g. 5.0"
+                      className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2 text-slate-900 dark:text-white placeholder-slate-400"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-600 dark:text-slate-300 text-sm mb-2">
+                      Take Profit (%)
+                      <span className="text-xs text-green-500 ml-1">Optional</span>
+                    </label>
+                    <input
+                      type="number"
+                      value={takeProfit}
+                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => setTakeProfit(e.target.value)}
+                      step="0.1"
+                      min="0.1"
+                      max="500"
+                      placeholder="e.g. 10.0"
+                      className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2 text-slate-900 dark:text-white placeholder-slate-400"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-center space-x-3">
+                  <div className="bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-white/10 rounded-lg p-3 flex-1">
+                    <div className="flex justify-between items-center">
+                      <span className="text-slate-600 dark:text-slate-300">Est. Cost</span>
+                      <span className="text-slate-900 dark:text-white font-bold">
+                        {estimatedCost ? `$${estimatedCost.toFixed(2)}` : '—'}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center space-2">
+                    <label className="flex items-center space-x-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={autoTrading}
+                        onChange={(e) => setAutoTrading(e.target.checked)}
+                        className="rounded border-slate-300 text-cyan-600 focus:ring-cyan-500"
+                      />
+                      <span className="text-slate-600 dark:text-slate-300 text-sm">Auto Trade</span>
+                    </label>
+                  </div>
+                </div>
+
+                {(stopLoss || takeProfit) && autoTrading && (
+                  <div className="bg-gradient-to-r from-amber-50 to-orange-50 dark:from-amber-900/20 dark:to-orange-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-3">
+                    <div className="flex items-center space-x-2 text-amber-800 dark:text-amber-200">
+                      <AlertTriangle className="w-4 h-4" />
+                      <span className="text-sm font-medium">
+                        Auto-trading active: {stopLoss && `SL: ${stopLoss}%`} {stopLoss && takeProfit && ' | '} {takeProfit && `TP: ${takeProfit}%`}
+                      </span>
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex space-x-3">
+                  <button
+                    onClick={handleBuy}
+                    disabled={trading}
+                    className="flex-1 text-white font-bold py-3 rounded-xl shadow-lg transition-all disabled:cursor-not-allowed flex items-center justify-center disabled:opacity-50"
+                    style={{ background: 'linear-gradient(to right, #06b6d4, #10b981)' }}
+                  >
+                    {trading ? <Loader2 className="w-5 h-5 animate-spin mr-2" /> : <Plus className="w-5 h-5 mr-2" />}
+                    Buy
+                  </button>
+                  <button
+                    onClick={handleSellSelected}
+                    disabled={trading}
+                    className="flex-1 text-white font-bold py-3 rounded-xl shadow-lg transition-all disabled:cursor-not-allowed flex items-center justify-center disabled:opacity-50"
+                    style={{ background: 'linear-gradient(to right, #ef4444, #dc2626)' }}
+                  >
+                    {trading ? <Loader2 className="w-5 h-5 animate-spin mr-2" /> : <Minus className="w-5 h-5 mr-2" />}
+                    Sell
+                  </button>
+                </div>
+              </div>
+
+            {/* Quick Trade and Risk & Progress Grid */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+            {/* Advanced Trading Panel */}
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.2 }}
+              className="bg-gradient-to-br from-white via-slate-50/50 to-cyan-50/30 dark:from-slate-800 dark:via-slate-800/80 dark:to-cyan-900/10 border border-slate-200/60 dark:border-slate-700/60 rounded-2xl p-6 shadow-lg backdrop-blur-sm"
+            >
+              <div className="flex items-center justify-between mb-6">
+                <div className="flex items-center space-x-3">
+                  <div className="p-2 bg-gradient-to-br from-emerald-500 to-cyan-600 rounded-xl shadow-lg">
+                    <PieChart className="w-5 h-5 text-white" />
+                  </div>
+                  <div>
+                    <h2 className="text-xl font-bold text-slate-900 dark:text-white">Advanced Trading</h2>
+                    <p className="text-sm text-slate-600 dark:text-slate-400">Professional trade execution</p>
+                  </div>
+                </div>
+
+                {/* Trading Status Indicator */}
+                <div className="flex items-center space-x-2">
+                  <div className={`w-3 h-3 rounded-full ${challenge ? 'bg-emerald-500 animate-pulse' : 'bg-red-500'}`}></div>
+                  <span className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                    {challenge ? 'Active' : 'Inactive'}
+                  </span>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div>
+                    <label className="block text-slate-600 dark:text-slate-300 text-sm mb-2">Quantity</label>
+                    <input
+                      type="number"
+                      value={tradeQuantity}
+                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => setTradeQuantity(e.target.value)}
+                      step="0.01"
+                      min="0.01"
+                      className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2 text-slate-900 dark:text-white"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-600 dark:text-slate-300 text-sm mb-2">
+                      Stop Loss (%)
+                      <span className="text-xs text-red-500 ml-1">Optional</span>
+                    </label>
+                    <input
+                      type="number"
+                      value={stopLoss}
+                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => setStopLoss(e.target.value)}
+                      step="0.1"
+                      min="0.1"
+                      max="50"
+                      placeholder="e.g. 5.0"
+                      className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2 text-slate-900 dark:text-white placeholder-slate-400"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-600 dark:text-slate-300 text-sm mb-2">
+                      Take Profit (%)
+                      <span className="text-xs text-green-500 ml-1">Optional</span>
+                    </label>
+                    <input
+                      type="number"
+                      value={takeProfit}
+                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => setTakeProfit(e.target.value)}
+                      step="0.1"
+                      min="0.1"
+                      max="500"
+                      placeholder="e.g. 10.0"
+                      className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2 text-slate-900 dark:text-white placeholder-slate-400"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-center space-x-3">
+                  <div className="bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-white/10 rounded-lg p-3 flex-1">
+                    <div className="flex justify-between items-center">
+                      <span className="text-slate-600 dark:text-slate-300">Est. Cost</span>
+                      <span className="text-slate-900 dark:text-white font-bold">
+                        {estimatedCost ? `$${estimatedCost.toFixed(2)}` : '—'}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center space-2">
+                    <label className="flex items-center space-x-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={autoTrading}
+                        onChange={(e) => setAutoTrading(e.target.checked)}
+                        className="rounded border-slate-300 text-cyan-600 focus:ring-cyan-500"
+                      />
+                      <span className="text-slate-600 dark:text-slate-300 text-sm">Auto Trade</span>
+                    </label>
+                  </div>
+                </div>
+
+                {(stopLoss || takeProfit) && autoTrading && (
+                  <div className="bg-gradient-to-r from-amber-50 to-orange-50 dark:from-amber-900/20 dark:to-orange-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-3">
+                    <div className="flex items-center space-x-2 text-amber-800 dark:text-amber-200">
+                      <AlertTriangle className="w-4 h-4" />
+                      <span className="text-sm font-medium">
+                        Auto-trading active: {stopLoss && `SL: ${stopLoss}%`} {stopLoss && takeProfit && ' | '} {takeProfit && `TP: ${takeProfit}%`}
+                      </span>
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex space-x-3">
+                  <button
+                    onClick={handleBuy}
+                    disabled={trading}
+                    className="flex-1 text-white font-bold py-3 rounded-xl shadow-lg transition-all disabled:cursor-not-allowed flex items-center justify-center disabled:opacity-50"
+                    style={{ background: 'linear-gradient(to right, #06b6d4, #10b981)' }}
+                  >
+                    {trading ? <Loader2 className="w-5 h-5 animate-spin mr-2" /> : <Plus className="w-5 h-5 mr-2" />}
+                    Buy
+                  </button>
+                  <button
+                    onClick={handleSellSelected}
+                    disabled={trading}
+                    className="flex-1 text-white font-bold py-3 rounded-xl shadow-lg transition-all disabled:cursor-not-allowed flex items-center justify-center disabled:opacity-50"
+                    style={{ background: 'linear-gradient(to right, #ef4444, #dc2626)' }}
+                  >
+                    {trading ? <Loader2 className="w-5 h-5 animate-spin mr-2" /> : <Minus className="w-5 h-5 mr-2" />}
+                    Sell
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+
+            {/* Risk & Progress Section */}
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.3 }}
+              className="bg-white dark:bg-[#0B1121]/80 border border-slate-200 dark:border-white/10 rounded-2xl p-6"
+            >
+              <div className="flex items-center space-x-2 mb-4">
+                <Gauge className="w-5 h-5 text-orange-500" />
+                <h2 className="text-xl font-bold text-slate-900 dark:text-white">Risk & Progress</h2>
+              </div>
+              <div className="space-y-3">
+                <div>
+                  <div className="flex justify-between text-sm text-slate-600 dark:text-slate-300">
+                    <span>Profit Target</span>
+                    <span>{profitTargetPercent.toFixed(2)}%</span>
+                  </div>
+                  <div className="w-full h-2 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                    <div className="h-full bg-emerald-500" style={{ width: `${Math.min(100, Math.max(0, profitTargetPercent))}%` }} />
+                  </div>
+                </div>
+                <div>
+                  <div className="flex justify-between text-sm text-slate-600 dark:text-slate-300">
+                    <span>Daily Loss</span>
+                    <span>{dailyLossPercent.toFixed(2)}%</span>
+                  </div>
+                  <div className="w-full h-2 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                    <div className="h-full bg-red-500" style={{ width: `${Math.min(100, Math.max(0, dailyLossPercent))}%` }} />
+                  </div>
+                </div>
+                <div>
+                  <div className="flex justify-between text-sm text-slate-600 dark:text-slate-300">
+                    <span>Drawdown</span>
+                    <span>{drawdownPercent.toFixed(2)}%</span>
+                  </div>
+                  <div className="w-full h-2 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                    <div className="h-full bg-orange-500" style={{ width: `${Math.min(100, Math.max(0, drawdownPercent))}%` }} />
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+
+            </div> {/* End Quick Trade and Risk & Progress Grid */}
+
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.4 }}
+            className="mt-6 bg-white dark:bg-[#0B1121]/80 border border-slate-200 dark:border-white/10 rounded-2xl p-6"
+          >
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <div>
+                <div className="flex items-center space-x-2 mb-4">
+                  <Wallet className="w-5 h-5 text-cyan-500" />
+                  <h2 className="text-xl font-bold text-slate-900 dark:text-white">Positions</h2>
+                </div>
+                <div className="space-y-3 max-h-96 overflow-y-auto">
+                  {trades.filter((t: Trade) => t.status === 'open').length === 0 ? (
+                    <p className="text-slate-600 dark:text-slate-400 text-center py-8">No open positions</p>
+                  ) : (
+                    trades.filter((t: Trade) => t.status === 'open').map((trade: Trade) => (
+                      <div key={trade.id} className="bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-white/10 rounded-lg p-3">
+                        <div className="flex justify-between items-center mb-2">
+                          <span className="text-slate-900 dark:text-white font-bold">{trade.symbol}</span>
+                          <span className={`text-sm font-bold ${trade.trade_type === 'buy' ? 'text-green-500' : 'text-red-500'}`}>
+                            {trade.trade_type.toUpperCase()}
+                          </span>
+                        </div>
+                        <div className="flex justify-between text-sm">
+                          <span className="text-slate-600 dark:text-slate-300">
+                            Qty: {trade.quantity} @ ${trade.entry_price.toFixed(2)}
+                          </span>
+                          <button
+                            onClick={() => handleSell(trade.id)}
+                            disabled={trading}
+                            className="text-white font-bold px-3 py-1 rounded-lg transition-colors disabled:cursor-not-allowed flex items-center disabled:opacity-50"
+                            style={{ background: 'linear-gradient(to right, #ef4444, #dc2626)' }}
+                          >
+                            {trading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Minus className="w-4 h-4 mr-2" />}
+                            Sell
+                          </button>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+              <div>
+                <div className="flex items-center space-x-2 mb-4">
+                  <Activity className="w-5 h-5 text-cyan-500" />
+                  <h2 className="text-xl font-bold text-slate-900 dark:text-white">Market Watch</h2>
+                </div>
+                <div className="bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-white/10 rounded-lg overflow-hidden">
+                  <div className="max-h-[400px] overflow-y-auto">
+                    {Object.entries(marketPrices).map(([symbol, data]: [string, any]) => (
+                      <div key={symbol} className="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-white/10 last:border-b-0 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors">
+                        <div className="flex items-center space-x-3">
+                          <div className="text-slate-900 dark:text-white font-semibold min-w-[80px]">{symbol}</div>
+                          <div className="text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wide">{data.market}</div>
+                        </div>
+                        <div className="flex items-center space-x-4">
+                          <div className="text-slate-900 dark:text-white font-mono">
+                            ${data.price?.toFixed(2) || 'N/A'}
+                          </div>
+                          <div className={`text-sm font-medium min-w-[60px] text-right ${data.change >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>
+                            {data.change >= 0 ? '+' : ''}{data.change_percent?.toFixed(2) || '0.00'}%
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="px-4 py-2 bg-slate-200 dark:bg-slate-700 text-xs text-slate-600 dark:text-slate-400 text-center">
+                    Total Assets: {Object.keys(marketPrices).length}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </motion.div>
+        </div>
+      </div>
+    </div>
+  );
+};
