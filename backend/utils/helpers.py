@@ -7,7 +7,10 @@ def get_current_user():
     """Get current authenticated user"""
     user_id = get_jwt_identity()
     if user_id:
-        return User.query.get(user_id)
+        try:
+            return User.query.get(int(user_id))
+        except (ValueError, TypeError):
+            return User.query.get(user_id)
     return None
 
 def require_role(*roles):
