@@ -4,7 +4,13 @@ from datetime import timedelta
 class Config:
     """Base configuration"""
     SECRET_KEY = os.environ.get('SECRET_KEY') or 'dev-secret-key-change-in-production'
-    SQLALCHEMY_DATABASE_URI = os.environ.get('DATABASE_URL') or 'sqlite:///tradesense.db'
+    
+    # Handle Render/Heroku DATABASE_URL which often starts with postgres:// instead of postgresql://
+    db_url = os.environ.get('DATABASE_URL')
+    if db_url and db_url.startswith("postgres://"):
+        db_url = db_url.replace("postgres://", "postgresql://", 1)
+    
+    SQLALCHEMY_DATABASE_URI = db_url or 'sqlite:///tradesense.db'
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     JWT_SECRET_KEY = os.environ.get('JWT_SECRET_KEY') or 'jwt-secret-key-change-in-production'
     JWT_ACCESS_TOKEN_EXPIRES = timedelta(hours=24)
@@ -17,7 +23,7 @@ class Config:
     
     
     # CORS Configuration
-    CORS_ORIGINS = os.environ.get('CORS_ORIGINS') or 'http://localhost:4173,http://localhost:5173,http://localhost:3000'
+    CORS_ORIGINS = os.environ.get('CORS_ORIGINS') or '*'
     
     # Challenge Configuration
     INITIAL_BALANCE = 5000.0
